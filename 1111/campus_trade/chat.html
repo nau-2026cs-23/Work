@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>消息 - 校园二手</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="nav-root"></div>
+
+<div class="tabs">
+  <div class="tab active" id="tab-chat" onclick="switchTab('chat')">聊天</div>
+  <div class="tab" id="tab-notif" onclick="switchTab('notif')">通知</div>
+</div>
+
+<div id="panel-chat">
+  <div id="chat-list-view">
+    <!-- 会话列表 -->
+    <div id="conv-list" class="chat-list"></div>
+  </div>
+
+  <!-- 聊天室（内嵌） -->
+  <div id="chat-room-view" style="display:none">
+    <div style="background:var(--white);padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-gray btn-sm" onclick="backToList()">← 返回</button>
+      <div>
+        <div id="room-title" style="font-weight:600"></div>
+        <div id="room-product" style="font-size:12px;color:#999"></div>
+      </div>
+    </div>
+    <div class="chat-room" style="height:calc(100vh - 168px)">
+      <div class="chat-messages" id="chat-msgs"></div>
+      <div class="chat-input-bar">
+        <input type="text" id="msg-input" placeholder="输入消息..." onkeydown="if(event.key==='Enter')sendMsg()">
+        <button class="btn btn-primary btn-sm" onclick="sendMsg()">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="panel-notif" style="display:none">
+  <div id="notif-list" class="container page-body"></div>
+</div>
+
+<div id="toast"></div>
+<script src="js/app.js"></script>
+<script>
+initSeedData();
+if (!Auth.require()) {}
+document.getElementById('nav-root').innerHTML = renderNavbar();
+
+const cur = Auth.cur();
+const params = new URLSearchParams(location.search);
+const targetUid = params.get('uid');
+const targetPid = params.get('pid');
+
+let activeConv = null;
+
+function switchTab(t) {
+  document.getElementById('tab-chat').classList.toggle('active', t === 'chat');
+  document.getElementById('tab-notif').classList.toggle('active', t === 'notif');
+  document.getElementById('panel-chat').style.display = t === 'chat' ? '' : 'none';
+  document.getElementById('panel-notif').style.display = t === 'notif' ? '' : 'none';
+  if (t === 'notif') renderNotifs();
+}
+
+function renderConvList() {
+  const convs = getConversations(cur.id);
+  const list = document.getElementById('conv-list');
+  if (convs.length === 0) {
+    list.innerHTML = '<div class="empty-state"><div class="icon">💬</div><p>暂无消息</p></div>';
+    return;
+  }
+  list.innerHTML = convs.map(c => {
+    const other = getUserById(c.otherId);
+    const p = getProductById(c.productId);
+    const msgs = DB.getArr('messages');
+    const unread = msgs.filter(m => m.toId === cur.id && m.fromId === c.otherId && m.productId === c.productId && !m.read).length;
+    return `
+    <div class="chat-item" onclick="openConv('${c.otherId}','${c.productId}')">
+      <div style="width:44px;height:44px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">
+        ${other ? other.nickname.charAt(0) : '?'}
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between">
+          <span style="font-weight:600;font-size:14px">${other ? escHtml(other.nickname) : '用户'}</span>
+          <span style="font-size:12px;color:#999">${fmtDate(c.lastMsg.createdAt)}</span>
+        </div>
+        <div style="font-size:13px;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${p ? `[${escHtml(p.title.slice(0,10))}] ` : ''}${escHtml(c.lastMsg.content)}
+        </div>
+      </div>
+      ${unread > 0 ? `<div class="chat-unread">${unread}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function openConv(otherId, productId) {
+  activeConv = { otherId, productId };
+  // 标记已读
+  const msgs = DB.getArr('messages');
+  msgs.forEach(m => { if (m.toId === cur.id && m.fromId === otherId && m.productId === productId) m.read = true; });
+  DB.set('messages', msgs);
+
+  const other = getUserById(otherId);
+  const p = getProductById(productId);
+  document.getElementById('room-title').textContent = other ? other.nickname : '用户';
+  document.getElementById('room-product').textContent = p ? `商品：${p.title}` : '';
+  document.getElementById('chat-list-view').style.display = 'none';
+  document.getElementById('chat-room-view').style.display = 'block';
+  renderMsgs();
+}
+
+function backToList() {
+  document.getElementById('chat-room-view').style.display = 'none';
+  document.getElementById('chat-list-view').style.display = 'block';
+  renderConvList();
+}
+
+function renderMsgs() {
+  const { otherId, productId } = activeConv;
+  const msgs = DB.getArr('messages').filter(m =>
+    ((m.fromId === cur.id && m.toId === otherId) || (m.fromId === otherId && m.toId === cur.id))
+    && m.productId === productId
+  ).sort((a, b) => a.createdAt - b.createdAt);
+
+  const el = document.getElementById('chat-msgs');
+  el.innerHTML = msgs.map(m => {
+    const isMine = m.fromId === cur.id;
+    const u = isMine ? cur : getUserById(m.fromId);
+    return `
+    <div class="msg-row ${isMine ? 'mine' : ''}">
+      <div class="msg-avatar">${u ? u.nickname.charAt(0) : '?'}</div>
+      <div>
+        <div class="msg-bubble">${escHtml(m.content)}</div>
+        <div style="font-size:11px;color:#bbb;margin-top:3px;${isMine?'text-align:right':''}">${fmtDate(m.createdAt)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function sendMsg() {
+  const content = document.getElementById('msg-input').value.trim();
+  if (!content) return;
+  if (!activeConv) return;
+  DB.push('messages', { id: uid(), fromId: cur.id, toId: activeConv.otherId, productId: activeConv.productId, content, createdAt: Date.now(), read: false });
+  addNotif(activeConv.otherId, 'message', `${cur.nickname}：${content.slice(0, 20)}`);
+  document.getElementById('msg-input').value = '';
+  renderMsgs();
+}
+
+function renderNotifs() {
+  const notifs = DB.getArr('notifications').filter(n => n.userId === cur.id).sort((a, b) => b.createdAt - a.createdAt);
+  // 标记已读
+  const allNotifs = DB.getArr('notifications');
+  allNotifs.forEach(n => { if (n.userId === cur.id) n.read = true; });
+  DB.set('notifications', allNotifs);
+
+  const el = document.getElementById('notif-list');
+  if (notifs.length === 0) { el.innerHTML = '<div class="empty-state"><div class="icon">🔔</div><p>暂无通知</p></div>'; return; }
+  el.innerHTML = notifs.map(n => `
+    <div style="background:var(--white);padding:14px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start">
+      <span style="font-size:22px">${n.type === 'order' ? '📦' : n.type === 'message' ? '💬' : '📢'}</span>
+      <div style="flex:1">
+        <div style="font-size:14px;color:var(--text)">${escHtml(n.content)}</div>
+        <div style="font-size:12px;color:#999;margin-top:4px">${fmtDate(n.createdAt)}</div>
+      </div>
+      ${!n.read ? '<span style="width:8px;height:8px;background:var(--red);border-radius:50%;flex-shrink:0;margin-top:6px"></span>' : ''}
+    </div>`).join('');
+}
+
+// 初始化
+renderConvList();
+if (targetUid && targetPid) {
+  openConv(targetUid, targetPid);
+}
+</script>
+</body>
+</html>

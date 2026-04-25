@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>商品详情 - 校园二手</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+.detail-wrap { max-width: 800px; margin: 0 auto; padding: 16px; padding-bottom: 80px; }
+.comment-box { margin-top: 8px; }
+.comment-input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 14px; resize: none; }
+</style>
+</head>
+<body>
+<div id="nav-root"></div>
+<div class="detail-wrap" id="detail-root"></div>
+<div id="action-root"></div>
+
+<!-- 模态框：下单 -->
+<div id="order-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">确认下单</div>
+    <div id="order-product-info" style="display:flex;gap:12px;margin-bottom:16px;padding:12px;background:#f9f9f9;border-radius:8px"></div>
+    <div class="form-group">
+      <label class="form-label">配送方式</label>
+      <select class="form-input" id="ship-type">
+        <option value="快递">快递发货</option>
+        <option value="自提">同城自提</option>
+      </select>
+    </div>
+    <div id="addr-section">
+      <div class="form-group">
+        <label class="form-label">收货地址</label>
+        <div id="addr-list"></div>
+        <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="showAddAddr()">+ 新增地址</button>
+      </div>
+    </div>
+    <div id="addr-form" style="display:none">
+      <div class="form-group">
+        <input class="form-input" id="addr-name" placeholder="收货人姓名">
+      </div>
+      <div class="form-group">
+        <input class="form-input" id="addr-phone" placeholder="联系电话">
+      </div>
+      <div class="form-group">
+        <input class="form-input" id="addr-detail" placeholder="详细地址">
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="saveAddr()">保存地址</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitOrder()">确认支付</button>
+    </div>
+  </div>
+</div>
+
+<!-- 模态框：举报 -->
+<div id="report-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">举报商品</div>
+    <div class="form-group">
+      <label class="form-label">举报原因</label>
+      <select class="form-input" id="report-reason">
+        <option>商品描述不实</option>
+        <option>商品图片造假</option>
+        <option>价格欺诈</option>
+        <option>违禁商品</option>
+        <option>其他</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <textarea class="comment-input" id="report-detail" rows="3" placeholder="请详细描述..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="document.getElementById('report-modal').style.display='none'">取消</button>
+      <button class="btn btn-danger" onclick="submitReport()">提交举报</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/app.js"></script>
+<script>
+initSeedData();
+document.getElementById('nav-root').innerHTML = renderNavbar();
+
+const pid = new URLSearchParams(location.search).get('id');
+const p = getProductById(pid);
+
+if (!p) {
+  document.getElementById('detail-root').innerHTML = '<div class="empty-state"><div class="icon">😢</div><p>商品不存在或已下架</p><a href="index.html" class="btn btn-primary" style="margin-top:16px">返回首页</a></div>';
+} else {
+  // 增加浏览量
+  const products = DB.getArr('products');
+  const idx = products.findIndex(x => x.id === pid);
+  if (idx > -1) { products[idx].views = (products[idx].views || 0) + 1; DB.set('products', products); }
+
+  // 加入浏览历史
+  const cur = Auth.cur();
+  if (cur) {
+    const hist = DB.getArr('history_' + cur.id).filter(x => x !== pid);
+    hist.unshift(pid);
+    DB.set('history_' + cur.id, hist.slice(0, 50));
+  }
+
+  renderDetail();
+  renderActionBar();
+}
+
+function renderDetail() {
+  const seller = getUserById(p.sellerId);
+  const isFaved = cur && DB.getArr('fav_' + cur.id).includes(pid);
+  const comments = DB.getArr('comments_' + pid);
+  const reviews = DB.getArr('reviews').filter(r => r.toId === p.sellerId);
+  const avgRating = reviews.length ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1) : '暂无';
+  const cur = Auth.cur();
+
+  document.getElementById('detail-root').innerHTML = `
+    <!-- 图片 -->
+    <div class="product-images card">
+      ${p.images && p.images.length
+        ? `<img class="product-main-img" id="main-img" src="${p.images[0]}">
+           <div class="product-thumbs">
+             ${p.images.map((img,i) => `<img class="product-thumb ${i===0?'active':''}" src="${img}" onclick="setImg('${img}',this)">`).join('')}
+           </div>`
+        : `<div style="width:100%;height:280px;background:linear-gradient(135deg,#f0f0f0,#e8e8e8);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:80px">${catEmoji(p.category)}</div>`}
+    </div>
+
+    <!-- 基本信息 -->
+    <div class="product-info">
+      <div>
+        <span class="product-price">${fmtMoney(p.price)}</span>
+        <span class="product-orig-price">${fmtMoney(p.origPrice)}</span>
+      </div>
+      <div class="product-title">${escHtml(p.title)}</div>
+      <div class="product-tags">
+        <span class="tag">${p.condition}</span>
+        <span class="tag">${p.category}</span>
+        <span class="tag">📍${p.location}</span>
+        <span class="tag">👁 ${p.views || 0}次浏览</span>
+        <span class="tag">❤️ ${DB.getArr('favs_' + pid).length || p.favs || 0}人收藏</span>
+      </div>
+      <div style="margin-top:12px;font-size:14px;color:#555;line-height:1.8">${escHtml(p.desc)}</div>
+
+      <!-- 卖家信息 -->
+      <div class="seller-row" onclick="location.href='profile.html?uid=${p.sellerId}'" style="cursor:pointer">
+        <div class="seller-avatar">${seller && seller.avatar ? `<img src="${seller.avatar}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : (seller ? seller.nickname.charAt(0) : '?')}</div>
+        <div style="flex:1">
+          <div class="seller-name">${seller ? escHtml(seller.nickname) : '未知用户'} ${seller && seller.verified ? '✅' : ''}</div>
+          <div class="seller-meta">信用评分：${avgRating}⭐ · ${reviews.length}条评价</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();chatWith()">💬 聊一聊</button>
+      </div>
+    </div>
+
+    <!-- 评价 -->
+    ${reviews.length ? `
+    <div class="card">
+      <div class="card-title">卖家评价 (${reviews.length})</div>
+      ${reviews.slice(0, 3).map(r => {
+        const u = getUserById(r.fromId);
+        return `<div class="review-item">
+          <div class="review-user">
+            <span style="font-size:20px">${u ? u.nickname.charAt(0) : '?'}</span>
+            <span style="font-weight:500">${u ? escHtml(u.nickname) : '用户'}</span>
+            <span class="stars">${'⭐'.repeat(r.rating)}</span>
+            <span style="font-size:12px;color:#999;margin-left:auto">${fmtDate(r.createdAt)}</span>
+          </div>
+          <div style="font-size:14px;color:#555">${escHtml(r.content)}</div>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+
+    <!-- 留言区 -->
+    <div class="card">
+      <div class="card-title">买家咨询 (${comments.length})</div>
+      ${comments.length === 0 ? '<div style="color:#999;font-size:14px;text-align:center;padding:12px 0">暂无留言</div>' : ''}
+      ${comments.map(c => {
+        const u = getUserById(c.userId);
+        return `<div class="review-item">
+          <div class="review-user">
+            <span style="font-size:18px">${u ? u.nickname.charAt(0) : '?'}</span>
+            <span>${u ? escHtml(u.nickname) : '用户'}</span>
+            <span style="font-size:12px;color:#999;margin-left:auto">${fmtDate(c.createdAt)}</span>
+          </div>
+          <div style="font-size:14px;color:#555">${escHtml(c.content)}</div>
+          ${c.reply ? `<div style="font-size:13px;background:#f9f9f9;padding:8px;border-radius:6px;margin-top:6px;color:#666"><strong>卖家回复：</strong>${escHtml(c.reply)}</div>` : ''}
+        </div>`;
+      }).join('')}
+      ${cur ? `<div class="comment-box" style="margin-top:12px">
+        <textarea class="comment-input" id="comment-input" rows="2" placeholder="咨询卖家..."></textarea>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="postComment()">发送</button>
+      </div>` : '<div style="text-align:center;margin-top:12px"><a href="login.html" class="btn btn-outline btn-sm">登录后留言</a></div>'}
+    </div>
+
+    <!-- 举报 -->
+    <div style="text-align:center;margin-top:8px">
+      <button class="btn btn-gray btn-sm" onclick="document.getElementById('report-modal').style.display='flex'">⚠️ 举报此商品</button>
+    </div>
+  `;
+}
+
+function setImg(src, el) {
+  document.getElementById('main-img').src = src;
+  document.querySelectorAll('.product-thumb').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function renderActionBar() {
+  const cur = Auth.cur();
+  const isMine = cur && cur.id === p.sellerId;
+  const isFaved = cur ? DB.getArr('fav_' + cur.id).includes(pid) : false;
+
+  document.getElementById('action-root').innerHTML = `
+    <div class="action-bar">
+      <button class="btn btn-gray" onclick="toggleFav()" id="fav-btn">
+        ${isFaved ? '❤️ 已收藏' : '🤍 收藏'}
+      </button>
+      ${isMine
+        ? `<button class="btn btn-outline" onclick="location.href='publish.html?edit=${pid}'">编辑</button>
+           <button class="btn btn-danger" onclick="delProduct()">删除</button>`
+        : `<button class="btn btn-outline" onclick="chatWith()">💬 联系卖家</button>
+           <button class="btn btn-primary" onclick="buyNow()">立即购买</button>`}
+    </div>`;
+}
+
+function toggleFav() {
+  if (!Auth.require()) return;
+  const cur = Auth.cur();
+  let favs = DB.getArr('fav_' + cur.id);
+  let pFavs = DB.getArr('favs_' + pid);
+  const idx = favs.indexOf(pid);
+  if (idx > -1) { favs.splice(idx, 1); pFavs = pFavs.filter(x => x !== cur.id); toast('已取消收藏'); }
+  else { favs.push(pid); pFavs.push(cur.id); toast('收藏成功'); }
+  DB.set('fav_' + cur.id, favs);
+  DB.set('favs_' + pid, pFavs);
+  renderActionBar();
+  renderDetail();
+}
+
+function chatWith() {
+  if (!Auth.require()) return;
+  const cur = Auth.cur();
+  if (cur.id === p.sellerId) { toast('不能和自己聊天'); return; }
+  location.href = `chat.html?uid=${p.sellerId}&pid=${pid}`;
+}
+
+function buyNow() {
+  if (!Auth.require()) return;
+  const cur = Auth.cur();
+  if (cur.id === p.sellerId) { toast('不能购买自己的商品'); return; }
+  if (p.status !== 'on') { toast('商品已下架'); return; }
+  showOrderModal();
+}
+
+function showOrderModal() {
+  const cur = Auth.cur();
+  document.getElementById('order-product-info').innerHTML = `
+    <div style="font-size:32px">${catEmoji(p.category)}</div>
+    <div><div style="font-weight:600;font-size:14px">${escHtml(p.title)}</div>
+    <div style="color:var(--primary);font-size:18px;font-weight:700;margin-top:4px">${fmtMoney(p.price)}</div></div>`;
+  renderAddrList();
+  document.getElementById('order-modal').style.display = 'flex';
+}
+function closeModal() { document.getElementById('order-modal').style.display = 'none'; }
+
+function renderAddrList() {
+  const cur = Auth.cur();
+  const addrs = cur.addresses || [];
+  const el = document.getElementById('addr-list');
+  if (addrs.length === 0) { el.innerHTML = '<div style="color:#999;font-size:13px">暂无地址，请添加</div>'; return; }
+  el.innerHTML = addrs.map(a => `
+    <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer">
+      <input type="radio" name="addr" value="${a.id}" ${a.isDefault ? 'checked' : ''} style="margin-top:3px">
+      <div><div style="font-weight:500">${escHtml(a.name)} ${a.phone}</div><div style="font-size:13px;color:#666">${escHtml(a.address)}</div></div>
+    </label>`).join('');
+}
+
+function showAddAddr() { document.getElementById('addr-form').style.display = 'block'; }
+function saveAddr() {
+  const name = document.getElementById('addr-name').value.trim();
+  const phone = document.getElementById('addr-phone').value.trim();
+  const detail = document.getElementById('addr-detail').value.trim();
+  if (!name || !phone || !detail) { toast('请填写完整地址信息'); return; }
+  const cur = Auth.cur();
+  const users = DB.getArr('users');
+  const uidx = users.findIndex(u => u.id === cur.id);
+  const addr = { id: uid(), name, phone, address: detail, isDefault: (cur.addresses || []).length === 0 };
+  users[uidx].addresses = [...(users[uidx].addresses || []), addr];
+  DB.set('users', users);
+  Auth.login(users[uidx]);
+  document.getElementById('addr-form').style.display = 'none';
+  renderAddrList();
+  toast('地址已保存');
+}
+
+function submitOrder() {
+  const cur = Auth.cur();
+  const shipType = document.getElementById('ship-type').value;
+  let address = '';
+  if (shipType === '快递') {
+    const sel = document.querySelector('input[name="addr"]:checked');
+    if (!sel) { toast('请选择收货地址'); return; }
+    const addrs = cur.addresses || [];
+    const a = addrs.find(x => x.id === sel.value);
+    address = a ? `${a.name} ${a.phone} ${a.address}` : '';
+  } else { address = '同城自提'; }
+
+  const order = {
+    id: uid(), buyerId: cur.id, sellerId: p.sellerId, productId: pid,
+    price: p.price, status: 'pending_pay', shipType, address,
+    createdAt: Date.now()
+  };
+  DB.push('orders', order);
+
+  // 下架商品
+  const products = DB.getArr('products');
+  const pidx = products.findIndex(x => x.id === pid);
+  if (pidx > -1) { products[pidx].status = 'sold'; DB.set('products', products); }
+
+  addNotif(cur.id, 'order', `您的订单已创建，请前往订单页面完成支付`);
+  addNotif(p.sellerId, 'order', `您的商品《${p.title}》有新买家下单`);
+  closeModal();
+  toast('下单成功！请前往订单页面付款');
+  setTimeout(() => location.href = 'orders.html', 1500);
+}
+
+function delProduct() {
+  if (!confirm('确定删除此商品？')) return;
+  const products = DB.getArr('products').filter(x => x.id !== pid);
+  DB.set('products', products);
+  toast('商品已删除');
+  setTimeout(() => location.href = 'index.html', 800);
+}
+
+function postComment() {
+  const cur = Auth.cur();
+  const content = document.getElementById('comment-input').value.trim();
+  if (!content) { toast('请输入内容'); return; }
+  DB.push('comments_' + pid, { id: uid(), userId: cur.id, content, createdAt: Date.now(), reply: '' });
+  addNotif(p.sellerId, 'comment', `有人在商品《${p.title}》下留言：${content.slice(0, 20)}`);
+  document.getElementById('comment-input').value = '';
+  toast('留言成功');
+  renderDetail();
+}
+
+function submitReport() {
+  toast('举报已提交，我们将尽快处理');
+  document.getElementById('report-modal').style.display = 'none';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>个人中心 - 校园二手</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="nav-root"></div>
+
+<div id="profile-root">
+  <!-- 动态渲染 -->
+</div>
+
+<!-- 编辑资料弹窗 -->
+<div id="edit-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">编辑资料</div>
+    <div class="form-group" style="text-align:center">
+      <div id="edit-avatar-preview" style="width:80px;height:80px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:36px;margin:0 auto 8px;cursor:pointer;overflow:hidden" onclick="document.getElementById('avatar-file').click()"></div>
+      <input type="file" id="avatar-file" accept="image/*" style="display:none" onchange="previewAvatar(this)">
+      <div style="font-size:12px;color:#999">点击更换头像</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">昵称</label>
+      <input class="form-input" id="edit-nick" maxlength="10">
+    </div>
+    <div class="form-group">
+      <label class="form-label">个人简介</label>
+      <textarea class="form-input" id="edit-bio" rows="2" maxlength="100" placeholder="介绍一下自己..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="closeEditModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveProfile()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 实名认证弹窗 -->
+<div id="verify-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">实名认证</div>
+    <div style="background:#fff3ee;border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;color:#666">
+      🔒 认证信息加密保存，仅用于身份核验，不对外展示
+    </div>
+    <div class="form-group">
+      <label class="form-label">真实姓名</label>
+      <input class="form-input" id="v-name" placeholder="请输入真实姓名">
+    </div>
+    <div class="form-group">
+      <label class="form-label">身份证号</label>
+      <input class="form-input" id="v-id" placeholder="请输入18位身份证号" maxlength="18">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="document.getElementById('verify-modal').style.display='none'">取消</button>
+      <button class="btn btn-primary" onclick="submitVerify()">提交认证</button>
+    </div>
+  </div>
+</div>
+
+<!-- 地址管理弹窗 -->
+<div id="addr-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">收货地址</div>
+    <div id="addr-list-modal"></div>
+    <div id="new-addr-form" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+      <div class="form-group">
+        <input class="form-input" id="new-addr-name" placeholder="收货人姓名">
+      </div>
+      <div class="form-group">
+        <input class="form-input" id="new-addr-phone" placeholder="联系电话">
+      </div>
+      <div class="form-group">
+        <input class="form-input" id="new-addr-detail" placeholder="详细地址（省市区街道门牌号）">
+      </div>
+      <button class="btn btn-outline btn-sm btn-block" onclick="addNewAddr()">+ 添加地址</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary btn-block" onclick="document.getElementById('addr-modal').style.display='none'">完成</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/app.js"></script>
+<script>
+initSeedData();
+document.getElementById('nav-root').innerHTML = renderNavbar();
+
+// 查看他人主页或自己
+const viewUid = new URLSearchParams(location.search).get('uid');
+const cur = Auth.cur();
+const isOwn = !viewUid || (cur && cur.id === viewUid);
+const profileUser = isOwn ? cur : getUserById(viewUid);
+
+if (!profileUser) {
+  document.getElementById('profile-root').innerHTML = '<div class="empty-state"><div class="icon">😢</div><p>用户不存在</p></div>';
+} else {
+  renderProfile();
+}
+
+function renderProfile() {
+  const u = isOwn ? Auth.cur() : profileUser;
+  if (!u) return;
+  const myProducts = DB.getArr('products').filter(p => p.sellerId === u.id && p.status === 'on');
+  const draftProducts = isOwn ? DB.getArr('products').filter(p => p.sellerId === u.id && p.status === 'draft') : [];
+  const soldProducts = DB.getArr('products').filter(p => p.sellerId === u.id && p.status === 'sold');
+  const reviews = DB.getArr('reviews').filter(r => r.toId === u.id);
+  const avgRating = reviews.length ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1) : '—';
+  const favCount = isOwn ? DB.getArr('fav_' + u.id).length : 0;
+  const histCount = isOwn ? DB.getArr('history_' + u.id).length : 0;
+
+  const avatarContent = u.avatar
+    ? `<img src="${u.avatar}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
+    : `<span>${u.nickname.charAt(0)}</span>`;
+
+  document.getElementById('profile-root').innerHTML = `
+    <div class="profile-header">
+      <div class="profile-user">
+        <div class="profile-avatar">${avatarContent}</div>
+        <div>
+          <div class="profile-name">${escHtml(u.nickname)} ${u.verified ? '<span style="font-size:14px">✅</span>' : ''}</div>
+          <div class="profile-sub">${escHtml(u.bio || '这个人很懒，什么都没写')}</div>
+          ${isOwn ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;border-color:rgba(255,255,255,.6);color:#fff" onclick="showEdit()">✏️ 编辑资料</button>` : ''}
+          ${!isOwn && cur ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;border-color:rgba(255,255,255,.6);color:#fff" onclick="blacklist('${u.id}')">🚫 拉黑</button>` : ''}
+        </div>
+      </div>
+      <div class="profile-stats">
+        <div class="profile-stat"><div class="profile-stat-num">${myProducts.length}</div><div class="profile-stat-label">在售</div></div>
+        <div class="profile-stat"><div class="profile-stat-num">${soldProducts.length}</div><div class="profile-stat-label">已卖</div></div>
+        <div class="profile-stat"><div class="profile-stat-num">${reviews.length}</div><div class="profile-stat-label">评价</div></div>
+        <div class="profile-stat"><div class="profile-stat-num">${avgRating}</div><div class="profile-stat-label">信用</div></div>
+      </div>
+    </div>
+
+    <div class="container">
+      ${isOwn ? `
+      <!-- 快捷操作 -->
+      <div class="card">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center">
+          ${[
+            ['📦', '我的订单', 'orders.html'],
+            ['❤️', `收藏(${favCount})`, '#favs'],
+            ['🕐', `历史(${histCount})`, '#history'],
+            ['🔔', '消息', 'chat.html']
+          ].map(([icon, label, href]) => `
+            <a href="${href}" style="padding:12px 0;display:block">
+              <div style="font-size:26px">${icon}</div>
+              <div style="font-size:12px;color:#666;margin-top:4px">${label}</div>
+            </a>`).join('')}
+        </div>
+      </div>
+
+      <!-- 认证 & 地址 -->
+      <div class="card">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between" onclick="${u.verified ? 'toast(\'已完成实名认证\')' : 'showVerify()'}">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:20px">🪪</span>
+              <div>
+                <div style="font-size:14px;font-weight:500">实名认证</div>
+                <div style="font-size:12px;color:${u.verified ? 'var(--green)' : '#999'}">${u.verified ? '✅ 已认证' : '未认证，认证后提升信任度'}</div>
+              </div>
+            </div>
+            ${!u.verified ? '<span style="color:#999;font-size:18px">›</span>' : ''}
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="showAddrModal()">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:20px">📍</span>
+              <div>
+                <div style="font-size:14px;font-weight:500">收货地址</div>
+                <div style="font-size:12px;color:#999">${(u.addresses || []).length}个地址</div>
+              </div>
+            </div>
+            <span style="color:#999;font-size:18px">›</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="logout()">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:20px">🚪</span>
+              <div style="font-size:14px;font-weight:500;color:var(--red)">退出登录</div>
+            </div>
+          </div>
+        </div>
+      </div>` : ''}
+
+      <!-- 在售商品 -->
+      <div class="card">
+        <div class="card-title">${isOwn ? '我发布的商品' : 'TA的商品'}</div>
+        ${isOwn ? `<div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="btn btn-primary btn-sm" onclick="location.href='publish.html'">+ 发布新商品</button>
+        </div>` : ''}
+        ${myProducts.length === 0 && draftProducts.length === 0
+          ? '<div class="empty-state" style="padding:24px 0"><div class="icon" style="font-size:36px">📭</div><p>暂无商品</p></div>'
+          : `<div class="goods-grid" style="margin-top:0">${[...myProducts, ...draftProducts].map(p => `
+            <div class="goods-card" onclick="location.href='product.html?id=${p.id}'">
+              ${p.images && p.images[0] ? `<img class="goods-card-img" src="${p.images[0]}">` : `<div class="goods-card-img-placeholder">${catEmoji(p.category)}</div>`}
+              <div class="goods-card-body">
+                <div class="goods-card-title">${escHtml(p.title)}</div>
+                <div class="goods-card-price">${fmtMoney(p.price)}</div>
+                <div class="goods-card-meta">
+                  <span class="badge" style="${p.status === 'draft' ? 'background:#f0f0f0;color:#999' : ''}">${p.status === 'draft' ? '草稿' : p.condition}</span>
+                  ${isOwn ? `<span onclick="event.stopPropagation();toggleStatus('${p.id}','${p.status}')" style="cursor:pointer;color:var(--primary)">
+                    ${p.status === 'on' ? '下架' : p.status === 'draft' ? '上架' : '—'}
+                  </span>` : ''}
+                </div>
+              </div>
+            </div>`).join('')}</div>`}
+      </div>
+
+      <!-- 收藏 (仅自己) -->
+      ${isOwn ? `
+      <div class="card" id="favs">
+        <div class="card-title">我的收藏</div>
+        ${(() => {
+          const favIds = DB.getArr('fav_' + u.id);
+          const favProducts = favIds.map(id => DB.getArr('products').find(p => p.id === id)).filter(Boolean);
+          return favProducts.length === 0
+            ? '<div class="empty-state" style="padding:20px 0"><p>暂无收藏</p></div>'
+            : `<div class="goods-grid" style="margin-top:0">${favProducts.map(renderGoodsCard).join('')}</div>`;
+        })()}
+      </div>
+
+      <!-- 浏览历史 -->
+      <div class="card" id="history">
+        <div class="card-title">浏览历史</div>
+        ${(() => {
+          const histIds = DB.getArr('history_' + u.id).slice(0, 10);
+          const histProducts = histIds.map(id => DB.getArr('products').find(p => p.id === id)).filter(Boolean);
+          return histProducts.length === 0
+            ? '<div class="empty-state" style="padding:20px 0"><p>暂无浏览记录</p></div>'
+            : `<div class="goods-grid" style="margin-top:0">${histProducts.map(renderGoodsCard).join('')}</div>`;
+        })()}
+      </div>` : ''}
+
+      <!-- 评价 -->
+      <div class="card">
+        <div class="card-title">收到的评价 (${reviews.length})</div>
+        ${reviews.length === 0 ? '<div class="empty-state" style="padding:20px 0"><p>暂无评价</p></div>' : reviews.slice(0, 5).map(r => {
+          const reviewer = getUserById(r.fromId);
+          return `<div class="review-item">
+            <div class="review-user">
+              <span style="font-size:18px">${reviewer ? reviewer.nickname.charAt(0) : '?'}</span>
+              <span style="font-weight:500">${reviewer ? escHtml(reviewer.nickname) : '用户'}</span>
+              <span class="stars">${'⭐'.repeat(r.rating)}</span>
+              <span style="font-size:12px;color:#999;margin-left:auto">${fmtDate(r.createdAt)}</span>
+            </div>
+            <div style="font-size:14px;color:#555">${escHtml(r.content)}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function toggleStatus(pid, status) {
+  const products = DB.getArr('products');
+  const idx = products.findIndex(p => p.id === pid);
+  if (idx < 0) return;
+  if (status === 'on') { products[idx].status = 'off'; toast('已下架'); }
+  else if (status === 'off' || status === 'draft') { products[idx].status = 'on'; toast('已上架'); }
+  DB.set('products', products);
+  renderProfile();
+}
+
+// 编辑资料
+let newAvatar = null;
+function showEdit() {
+  const u = Auth.cur();
+  document.getElementById('edit-nick').value = u.nickname;
+  document.getElementById('edit-bio').value = u.bio || '';
+  const preview = document.getElementById('edit-avatar-preview');
+  preview.innerHTML = u.avatar ? `<img src="${u.avatar}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : u.nickname.charAt(0);
+  newAvatar = null;
+  document.getElementById('edit-modal').style.display = 'flex';
+}
+function closeEditModal() { document.getElementById('edit-modal').style.display = 'none'; }
+function previewAvatar(input) {
+  const file = input.files[0];
+  if (!file) return;
+  compressImage(file, 200).then(b64 => {
+    newAvatar = b64;
+    document.getElementById('edit-avatar-preview').innerHTML = `<img src="${b64}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+  });
+}
+function saveProfile() {
+  const nick = document.getElementById('edit-nick').value.trim();
+  const bio = document.getElementById('edit-bio').value.trim();
+  if (!nick || nick.length < 2) { toast('昵称至少2个字符'); return; }
+  const users = DB.getArr('users');
+  const u = Auth.cur();
+  const idx = users.findIndex(x => x.id === u.id);
+  users[idx].nickname = nick;
+  users[idx].bio = bio;
+  if (newAvatar) users[idx].avatar = newAvatar;
+  DB.set('users', users);
+  Auth.login(users[idx]);
+  closeEditModal();
+  toast('资料已保存');
+  renderProfile();
+}
+
+// 实名认证
+function showVerify() { document.getElementById('verify-modal').style.display = 'flex'; }
+function submitVerify() {
+  const name = document.getElementById('v-name').value.trim();
+  const id = document.getElementById('v-id').value.trim();
+  if (!name) { toast('请输入真实姓名'); return; }
+  if (!/^\d{17}[\dXx]$/.test(id)) { toast('请输入正确的18位身份证号'); return; }
+  const users = DB.getArr('users');
+  const u = Auth.cur();
+  const idx = users.findIndex(x => x.id === u.id);
+  users[idx].verified = true;
+  DB.set('users', users);
+  Auth.login(users[idx]);
+  document.getElementById('verify-modal').style.display = 'none';
+  toast('实名认证成功！');
+  renderProfile();
+}
+
+// 地址管理
+function showAddrModal() {
+  renderAddrListModal();
+  document.getElementById('addr-modal').style.display = 'flex';
+}
+function renderAddrListModal() {
+  const u = Auth.cur();
+  const addrs = u.addresses || [];
+  document.getElementById('addr-list-modal').innerHTML = addrs.length === 0
+    ? '<div style="color:#999;font-size:13px;text-align:center;padding:12px">暂无地址</div>'
+    : addrs.map(a => `
+      <div style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
+        <div style="flex:1">
+          <div style="font-weight:500">${escHtml(a.name)} ${a.phone}</div>
+          <div style="font-size:13px;color:#666">${escHtml(a.address)}</div>
+        </div>
+        ${a.isDefault ? '<span style="font-size:11px;color:var(--primary);background:#fff3ee;padding:2px 6px;border-radius:4px">默认</span>' : `<button class="btn btn-gray btn-sm" onclick="setDefaultAddr('${a.id}')">设默认</button>`}
+        <button class="btn btn-danger btn-sm" onclick="delAddr('${a.id}')">删</button>
+      </div>`).join('');
+}
+function addNewAddr() {
+  const name = document.getElementById('new-addr-name').value.trim();
+  const phone = document.getElementById('new-addr-phone').value.trim();
+  const detail = document.getElementById('new-addr-detail').value.trim();
+  if (!name || !phone || !detail) { toast('请填写完整地址信息'); return; }
+  const users = DB.getArr('users');
+  const u = Auth.cur();
+  const idx = users.findIndex(x => x.id === u.id);
+  const addr = { id: uid(), name, phone, address: detail, isDefault: (users[idx].addresses || []).length === 0 };
+  users[idx].addresses = [...(users[idx].addresses || []), addr];
+  DB.set('users', users);
+  Auth.login(users[idx]);
+  document.getElementById('new-addr-name').value = '';
+  document.getElementById('new-addr-phone').value = '';
+  document.getElementById('new-addr-detail').value = '';
+  toast('地址已添加');
+  renderAddrListModal();
+}
+function delAddr(addrId) {
+  const users = DB.getArr('users');
+  const u = Auth.cur();
+  const idx = users.findIndex(x => x.id === u.id);
+  users[idx].addresses = (users[idx].addresses || []).filter(a => a.id !== addrId);
+  DB.set('users', users);
+  Auth.login(users[idx]);
+  renderAddrListModal();
+}
+function setDefaultAddr(addrId) {
+  const users = DB.getArr('users');
+  const u = Auth.cur();
+  const idx = users.findIndex(x => x.id === u.id);
+  users[idx].addresses = (users[idx].addresses || []).map(a => ({ ...a, isDefault: a.id === addrId }));
+  DB.set('users', users);
+  Auth.login(users[idx]);
+  renderAddrListModal();
+}
+
+function blacklist(uid) {
+  if (!cur) { location.href = 'login.html'; return; }
+  const bl = DB.getArr('blacklist_' + cur.id);
+  if (bl.includes(uid)) { toast('该用户已在黑名单中'); return; }
+  bl.push(uid);
+  DB.set('blacklist_' + cur.id, bl);
+  toast('已将该用户加入黑名单');
+}
+
+function logout() {
+  if (!confirm('确定退出登录？')) return;
+  Auth.logout();
+  location.href = 'login.html';
+}
+</script>
+</body>
+</html>

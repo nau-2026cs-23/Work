@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 / 注册 - 校园二手</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-box">
+    <div class="login-logo">🏫 校园二手</div>
+    <div class="login-sub">校园二手交易平台</div>
+
+    <div class="tabs" style="margin-bottom:24px;border-radius:8px;overflow:hidden">
+      <div class="tab active" id="tab-login" onclick="switchTab('login')">登录</div>
+      <div class="tab" id="tab-reg" onclick="switchTab('reg')">注册</div>
+    </div>
+
+    <!-- 登录 -->
+    <div id="panel-login">
+      <div class="tabs" style="margin-bottom:16px;font-size:13px">
+        <div class="tab active" id="sub-pwd" onclick="switchLogin('pwd')">密码登录</div>
+        <div class="tab" id="sub-sms" onclick="switchLogin('sms')">短信登录</div>
+      </div>
+
+      <!-- 密码登录 -->
+      <div id="login-pwd-form">
+        <div class="form-group">
+          <label class="form-label">手机号 / 邮箱</label>
+          <input class="form-input" id="l-account" placeholder="请输入手机号或邮箱">
+        </div>
+        <div class="form-group">
+          <label class="form-label">密码</label>
+          <input class="form-input" id="l-pwd" type="password" placeholder="请输入密码">
+        </div>
+        <button class="btn btn-primary btn-block" onclick="doLogin()">登 录</button>
+      </div>
+
+      <!-- 短信登录 -->
+      <div id="login-sms-form" style="display:none">
+        <div class="form-group">
+          <label class="form-label">手机号</label>
+          <input class="form-input" id="s-phone" placeholder="请输入手机号">
+        </div>
+        <div class="form-group">
+          <label class="form-label">验证码</label>
+          <div class="input-group">
+            <input class="form-input" id="s-code" placeholder="请输入验证码">
+            <button class="btn btn-outline btn-sm" id="sms-btn" onclick="sendSMS('s-phone','sms-btn','s-sms-cache')">获取验证码</button>
+          </div>
+          <div class="form-hint">测试验证码：<strong id="s-sms-cache" style="color:var(--primary)"></strong></div>
+        </div>
+        <button class="btn btn-primary btn-block" onclick="doSMSLogin()">登 录</button>
+      </div>
+
+      <div style="text-align:center;margin-top:16px;font-size:13px;color:#999">
+        测试账号：18800000000 / 123456（管理员）
+      </div>
+    </div>
+
+    <!-- 注册 -->
+    <div id="panel-reg" style="display:none">
+      <div class="form-group">
+        <label class="form-label">昵称</label>
+        <input class="form-input" id="r-name" placeholder="请输入昵称（2-10字）">
+      </div>
+      <div class="form-group">
+        <label class="form-label">手机号</label>
+        <div class="input-group">
+          <input class="form-input" id="r-phone" placeholder="请输入手机号">
+          <button class="btn btn-outline btn-sm" id="reg-sms-btn" onclick="sendSMS('r-phone','reg-sms-btn','r-sms-cache')">获取验证码</button>
+        </div>
+        <div class="form-hint">测试验证码：<strong id="r-sms-cache" style="color:var(--primary)"></strong></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">验证码</label>
+        <input class="form-input" id="r-code" placeholder="请输入验证码">
+      </div>
+      <div class="form-group">
+        <label class="form-label">邮箱（选填）</label>
+        <input class="form-input" id="r-email" placeholder="请输入邮箱">
+      </div>
+      <div class="form-group">
+        <label class="form-label">密码</label>
+        <input class="form-input" id="r-pwd" type="password" placeholder="请设置密码（6位以上）">
+      </div>
+      <div class="form-group">
+        <label class="form-label">确认密码</label>
+        <input class="form-input" id="r-pwd2" type="password" placeholder="请再次输入密码">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="doRegister()">注 册</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/app.js"></script>
+<script>
+initSeedData();
+
+const mode = new URLSearchParams(location.search).get('mode');
+if (mode === 'reg') switchTab('reg');
+
+function switchTab(t) {
+  document.getElementById('tab-login').classList.toggle('active', t === 'login');
+  document.getElementById('tab-reg').classList.toggle('active', t === 'reg');
+  document.getElementById('panel-login').style.display = t === 'login' ? '' : 'none';
+  document.getElementById('panel-reg').style.display = t === 'reg' ? '' : 'none';
+}
+
+function switchLogin(t) {
+  document.getElementById('sub-pwd').classList.toggle('active', t === 'pwd');
+  document.getElementById('sub-sms').classList.toggle('active', t === 'sms');
+  document.getElementById('login-pwd-form').style.display = t === 'pwd' ? '' : 'none';
+  document.getElementById('login-sms-form').style.display = t === 'sms' ? '' : 'none';
+}
+
+// 发送验证码（模拟）
+const smsCodes = {};
+function sendSMS(inputId, btnId, cacheId) {
+  const phone = document.getElementById(inputId).value.trim();
+  if (!/^1[3-9]\d{9}$/.test(phone)) { toast('请输入正确的手机号'); return; }
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  smsCodes[phone] = code;
+  document.getElementById(cacheId).textContent = code;
+  toast('验证码已发送（模拟）');
+  let sec = 60;
+  const btn = document.getElementById(btnId);
+  btn.disabled = true;
+  const t = setInterval(() => {
+    btn.textContent = `${--sec}s后重发`;
+    if (sec <= 0) { clearInterval(t); btn.disabled = false; btn.textContent = '获取验证码'; }
+  }, 1000);
+}
+
+function doLogin() {
+  const acc = document.getElementById('l-account').value.trim();
+  const pwd = document.getElementById('l-pwd').value;
+  if (!acc || !pwd) { toast('请填写账号和密码'); return; }
+  const users = DB.getArr('users');
+  const u = users.find(u => (u.phone === acc || u.email === acc) && u.password === pwd);
+  if (!u) { toast('账号或密码错误'); return; }
+  if (u.banned) { toast('账号已被封禁'); return; }
+  Auth.login(u);
+  toast('登录成功');
+  setTimeout(() => location.href = 'index.html', 800);
+}
+
+function doSMSLogin() {
+  const phone = document.getElementById('s-phone').value.trim();
+  const code = document.getElementById('s-code').value.trim();
+  if (!phone || !code) { toast('请填写手机号和验证码'); return; }
+  if (smsCodes[phone] !== code) { toast('验证码错误'); return; }
+  const users = DB.getArr('users');
+  let u = users.find(u => u.phone === phone);
+  if (!u) {
+    u = { id: uid(), phone, email: '', password: '', nickname: '用户' + phone.slice(-4), avatar: '', role: 'user', verified: false, createdAt: Date.now(), bio: '', addresses: [] };
+    DB.push('users', u);
+  }
+  if (u.banned) { toast('账号已被封禁'); return; }
+  Auth.login(u);
+  toast('登录成功');
+  setTimeout(() => location.href = 'index.html', 800);
+}
+
+function doRegister() {
+  const name = document.getElementById('r-name').value.trim();
+  const phone = document.getElementById('r-phone').value.trim();
+  const code = document.getElementById('r-code').value.trim();
+  const email = document.getElementById('r-email').value.trim();
+  const pwd = document.getElementById('r-pwd').value;
+  const pwd2 = document.getElementById('r-pwd2').value;
+  if (!name || name.length < 2 || name.length > 10) { toast('昵称需2-10个字符'); return; }
+  if (!/^1[3-9]\d{9}$/.test(phone)) { toast('请输入正确的手机号'); return; }
+  if (smsCodes[phone] !== code) { toast('验证码错误'); return; }
+  if (email && !/^[^@]+@[^@]+\.[^@]+$/.test(email)) { toast('邮箱格式不正确'); return; }
+  if (pwd.length < 6) { toast('密码至少6位'); return; }
+  if (pwd !== pwd2) { toast('两次密码不一致'); return; }
+  const users = DB.getArr('users');
+  if (users.find(u => u.phone === phone)) { toast('该手机号已注册'); return; }
+  if (email && users.find(u => u.email === email)) { toast('该邮箱已注册'); return; }
+  const u = { id: uid(), phone, email, password: pwd, nickname: name, avatar: '', role: 'user', verified: false, createdAt: Date.now(), bio: '', addresses: [] };
+  DB.push('users', u);
+  addNotif(u.id, 'system', '欢迎加入校园二手交易平台！');
+  Auth.login(u);
+  toast('注册成功');
+  setTimeout(() => location.href = 'index.html', 800);
+}
+</script>
+</body>
+</html>
